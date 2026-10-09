@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.ipynb_checkpoints/
+# data, checkpoints and results are not tracked
+data/
+embeddings/
+checkpoints/
+results/
+*.wav
+*.mp3
+*.flac
+*.npz
+*.npy
+*.pt
+*.ckpt
+*.bin
+*.safetensors
+*.zip
+.yt_cache/
+logs/
+wandb/
