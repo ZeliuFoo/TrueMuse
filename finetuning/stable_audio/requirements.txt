@@ -17,3 +17,4 @@ torchmetrics==1.8.2
 transformers==4.47.0
 wandb==0.21.3
 webdataset==1.0.2
+setuptools<81

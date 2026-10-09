@@ -26,3 +26,4 @@ soundfile==0.12.1
 torchlibrosa==0.1.0
 tqdm==4.67.3
 wandb==0.12.14
+setuptools<81

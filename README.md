@@ -55,16 +55,21 @@ required for evaluation.
 ```bash
 hf download AnonymousAuthorsssss/TrueMuse --repo-type dataset --local-dir <dataset_root>
 cd <dataset_root>
-unzip -q truemuse_concepts.zip -d data          # this archive has no data/ prefix
-for f in truemuse_generated_*.zip truemuse_embeddings_jamendo.zip; do unzip -q "$f"; done
+unzip -q truemuse_concepts.zip -d data                                                # no data/ prefix
+unzip -q truemuse_generated_stable_audio_musician.zip -d data/generated/stable-audio    # no data/ prefix
+for f in truemuse_generated_audioldm2.zip truemuse_generated_mustango.zip \
+         truemuse_generated_stable_audio_{genre,instrument,melody}.zip truemuse_embeddings_jamendo.zip; do
+    unzip -q "$f"
+done
 ```
 
 ### Instrument source clips
 
-The instrument source audio is **not redistributed**. `data/concepts/metadata_instruments.csv` lists the
-YouTube ID and start time of each instrument; the script below downloads the audio and cuts 6 consecutive
-10-second clips (the first 3 form the 3-clip set). It needs `yt-dlp` and `ffmpeg` on `PATH`. Videos that have
-been removed or are region-locked will be reported as failed.
+The instrument source audio is **not redistributed**. [`scripts/metadata_instruments.csv`](scripts/metadata_instruments.csv)
+lists the YouTube ID and start time of each instrument; the script below downloads the audio and cuts 6 consecutive
+10-second clips (the first 3 form the 3-clip set). It needs `ffmpeg` and a recent `yt-dlp` on `PATH`
+(`pip install -U "yt-dlp[default]"`; older versions get HTTP 403 from YouTube). Instruments whose video can no
+longer be downloaded are reported as failed.
 
 ```bash
 python scripts/download_instruments.py --data-root <dataset_root>/data
@@ -99,19 +104,19 @@ instrumental stems (vocals removed with Demucs). Instrument clips come from YouT
 ```bash
 conda create -n truemuse python=3.10 && conda activate truemuse
 pip install torch==2.0.1 torchaudio==2.0.2 torchvision==0.15.2
-pip install transformers==4.30.2 accelerate==1.13.0
-pip install librosa==0.9.2 soundfile==0.13.1 dac==0.4.3
-pip install numpy==1.23.5 scipy tqdm
+pip install transformers==4.30.2 accelerate==0.23.0
+pip install librosa==0.9.2 soundfile==0.12.1 descript-audio-codec==1.0.0
+pip install numpy==1.26.4 scipy==1.11.4 tqdm "setuptools<81"    # librosa 0.9.2 needs pkg_resources
 ```
 
-**Generators.** Fine-tuning and generation build on each generator's official code. Use one environment per
+**Generators.** Fine-tuning and generation need a CUDA GPU and build on each generator's official code. Use one environment per
 generator, clone the upstream repository, and copy our scripts into its root:
 
 | Generator | Upstream code | Base checkpoint | Copy into the upstream root | Environment |
 |---|---|---|---|---|
 | AudioLDM2 | [zelaki/DreamSound](https://github.com/zelaki/DreamSound) | `cvssp/audioldm2` | `finetuning/audioldm2/*.py`, `generation/audioldm2/*.py` | `finetuning/audioldm2/requirements.txt` |
 | Mustango | [AMAAI-Lab/mustango](https://github.com/AMAAI-Lab/mustango) | `declare-lab/mustango` | `finetuning/mustango/*.py` (replaces the upstream `models.py`, `mustango.py`, `tango.py`), `generation/mustango/*.py` | `finetuning/mustango/requirements.txt`, plus the upstream `diffusers` fork (`pip install -e diffusers`) |
-| Stable Audio Open | [Stability-AI/stable-audio-tools](https://github.com/Stability-AI/stable-audio-tools) | `stabilityai/stable-audio-open-1.0` (gated: accept the license on Hugging Face and log in) | `finetuning/stable_audio/dreambooth_stable_audio.py`, `generation/stable_audio/*.py` | `pip install -e .` in the upstream repo, then `finetuning/stable_audio/requirements.txt` |
+| Stable Audio Open | [Stability-AI/stable-audio-tools](https://github.com/Stability-AI/stable-audio-tools) | `stabilityai/stable-audio-open-1.0` (gated: accept the license on Hugging Face and log in) | `finetuning/stable_audio/dreambooth_stable_audio.py`, `generation/stable_audio/*.py` | `git checkout 50049e3` (the version we used; later versions changed the package layout), `pip install -e .`, then `finetuning/stable_audio/requirements.txt` |
 
 ---
 
@@ -164,6 +169,7 @@ accelerate launch dreambooth_mustango.py \
     --instance_data_dir <dataset_root>/data/concepts/musician_3/composer_001 \
     --instance_word sks --object_class musician \
     --train_batch_size 3 --max_train_steps 1000 --learning_rate 4e-6 \
+    --freeze_music_encoder --checkpointing_steps 100 \
     --output_dir <BASE>/composer_models_3/composer_001_mustango_db
 
 # Stable Audio Open (inside stable-audio-tools)
@@ -176,6 +182,10 @@ python dreambooth_stable_audio.py \
 ```
 
 For instruments, pass the instrument name as `--object_class` (for example `--object_class violin`).
+We fine-tuned on a single A100. Mustango at batch size 3 does not fit on a 24 GB GPU; there, use a smaller
+`--train_batch_size` with `--gradient_accumulation_steps` to keep the same effective batch.
+AudioLDM2 saves the pipeline that the generation scripts load (`pipeline_step_<N>`) only at validation steps, so
+`--validation_steps` must divide the number of training steps: 500 for 1000 or 1500 steps, 300 for melody.
 
 ---
 
@@ -194,7 +204,7 @@ python generate_all_musicians_3.py     # also: _musicians_6, _instruments_{3,6},
 | Sampling steps | 200 | 100 | 200 (`dpmpp-3m-sde`, sigma 0.3 to 500) |
 | Guidance scale | 3.5 (pipeline default) | 3.0 | 4.0 |
 | Waveforms per prompt | 4 | 4 | 4 |
-| Output | 10 s, 16 kHz | 10 s, 16 kHz | 10 s, 44.1 kHz stereo |
+| Output | 10 s, 16 kHz mono | 10.24 s, 16 kHz mono | 10 s, 44.1 kHz stereo |
 | Prompts per concept | 15 contextual + 28 style | 15 contextual + 28 style | 15 contextual + 8 style (genre: 28 style) |
 
 *Contextual* prompts place the attribute in a richer musical scene; *style* prompts ask for the attribute in a
@@ -248,7 +258,7 @@ python evaluate.py --ckpt-dir checkpoints --out-dir results --test-generator all
 
 **Protocol.** Attributes are split 70 / 15 / 15 into train / validation / test (seed 42); the split is shared
 by all encoders and generators. For every test query, the gallery contains the source clips of all test
-attributes of the same type plus the 228,598 Jamendo distractors. **R@k** is the fraction of the query's own
+attributes of the same task (for example `musician_3`) plus the 228,598 Jamendo distractors. **R@k** is the fraction of the query's own
 source clips that appear in the top k; we also report mAP. Results are reported per generator: absolute
 scores depend on how closely a generator reproduces its fine-tuning clips, so methods should be compared
 within a generator.
